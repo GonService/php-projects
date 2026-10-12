@@ -1,0 +1,19 @@
+{
+    "name": "gonservice/php-legacy-modernization",
+    "description": "Teaching case: a vulnerable legacy PHP page (before/) and the same feature refactored with PDO prepared statements, validation, escaping, CSRF and tests (after/).",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "ext-pdo_sqlite": "*",
+        "ext-mbstring": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Modernized\\": "after/src/"
+        }
+    },
+    "scripts": {
+        "test": "php tests/run.php"
+    }
+}

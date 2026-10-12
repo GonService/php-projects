@@ -1,0 +1,6 @@
+/var/*
+!/var/.gitkeep
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+/vendor/

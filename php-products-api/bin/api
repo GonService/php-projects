@@ -1,0 +1,65 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use ProductsApi\Domain\ApiKeys;
+use ProductsApi\Support\Database;
+use ProductsApi\Support\DemoSeeder;
+
+require dirname(__DIR__) . '/src/autoload.php';
+
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+
+$usage = <<<'TXT'
+    Usage:
+      php bin/api create-key <name>     Create an API key for write routes (shown only once)
+      php bin/api list-keys             List keys (names and dates, never the keys)
+      php bin/api revoke-key <id>       Revoke a key
+      php bin/api seed-demo             Insert a fictional demo catalog
+
+    The database path comes from API_DB (default: var/catalog.sqlite).
+
+    TXT;
+
+$dsn = Database::defaultDsn();
+if (!is_dir(dirname(substr($dsn, 7)))) {
+    mkdir(dirname(substr($dsn, 7)), 0775, true);
+}
+$pdo = Database::connect($dsn);
+Database::migrate($pdo);
+$keys = new ApiKeys($pdo);
+$now = gmdate('Y-m-d H:i:s');
+
+switch ($argv[1] ?? 'help') {
+    case 'create-key':
+        $name = trim($argv[2] ?? '');
+        if ($name === '') {
+            fwrite(STDERR, "Give the key a name, e.g. php bin/api create-key erp-integration\n");
+            exit(1);
+        }
+        $created = $keys->create($name, $now);
+        echo "Key #{$created['id']} ({$name}). Store it now, it is not shown again:\n\n{$created['key']}\n";
+        break;
+
+    case 'list-keys':
+        foreach ($keys->all() as $k) {
+            printf("#%-3d %-24s created %s  last used %s%s\n", $k['id'], $k['name'], $k['created_at'], $k['last_used_at'] ?? 'never', $k['revoked_at'] !== null ? '  REVOKED' : '');
+        }
+        break;
+
+    case 'revoke-key':
+        $ok = $keys->revoke((int) ($argv[2] ?? 0), $now);
+        echo $ok ? "Revoked.\n" : "No active key with that id.\n";
+        exit($ok ? 0 : 1);
+
+    case 'seed-demo':
+        echo 'Inserted ' . (new DemoSeeder($pdo))->run($now) . " demo products.\n";
+        break;
+
+    default:
+        echo $usage;
+        exit(($argv[1] ?? 'help') === 'help' ? 0 : 1);
+}

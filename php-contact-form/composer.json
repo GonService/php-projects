@@ -1,0 +1,19 @@
+{
+    "name": "gonservice/php-contact-form",
+    "description": "Secure contact form for business websites: validation, CSRF, honeypot, per-IP rate limit, SQLite storage, optional SMTP and a password-protected inbox. Plain PHP 8.3.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "ext-pdo_sqlite": "*",
+        "ext-mbstring": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "ContactForm\\": "src/"
+        }
+    },
+    "scripts": {
+        "test": "php tests/run.php"
+    }
+}

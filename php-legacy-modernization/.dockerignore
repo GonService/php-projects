@@ -1,0 +1,8 @@
+# The insecure legacy example must never end up in an image.
+before
+tests
+docs
+var/*.sqlite*
+.git
+Dockerfile
+.dockerignore

@@ -1,0 +1,2 @@
+# INSECURE EXAMPLE - never serve this folder. Blocks access if it is ever copied to an Apache server.
+Require all denied

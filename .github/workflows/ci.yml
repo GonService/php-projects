@@ -1,0 +1,256 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  laravel-tests:
+    name: laravel-docker-starter / tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: laravel-docker-starter
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_sqlite, intl, zip, bcmath
+          coverage: none
+
+      - name: Composer cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('laravel-docker-starter/composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Code style (Pint)
+        run: vendor/bin/pint --test
+
+      - name: Tests
+        run: php artisan test
+
+  laravel-docker:
+    name: laravel-docker-starter / docker smoke test
+    runs-on: ubuntu-latest
+    needs: laravel-tests
+    defaults:
+      run:
+        working-directory: laravel-docker-starter
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: laravel-docker-starter/Dockerfile
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          sed -i "s|^APP_KEY=.*|APP_KEY=base64:$(openssl rand -base64 32)|" .env
+          sed -i "s|^APP_ENV=.*|APP_ENV=production|; s|^APP_DEBUG=.*|APP_DEBUG=false|" .env
+
+      - name: Start the stack
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Smoke test
+        run: |
+          set -eux
+          curl -fsS http://localhost:8080/healthz
+          curl -fsS http://localhost:8080/up > /dev/null
+          curl -fsS -X POST http://localhost:8080/api/tasks \
+            -H 'Accept: application/json' -H 'Content-Type: application/json' \
+            -d '{"title":"Smoke test task"}' | grep -q '"title":"Smoke test task"'
+          curl -fsS -H 'Accept: application/json' http://localhost:8080/api/tasks | grep -q 'Smoke test task'
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  crm:
+    name: php-mini-crm
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: php-mini-crm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_sqlite, mbstring
+          coverage: none
+
+      - name: Lint (php -l)
+        run: find . -type f \( -name '*.php' -o -path './bin/*' \) -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Tests
+        run: php tests/run.php
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: php-mini-crm/Dockerfile
+
+      - name: Docker build and smoke test
+        run: |
+          set -eux
+          docker build -t php-mini-crm:ci .
+          docker run -d --name crm -p 8081:8080 php-mini-crm:ci
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' crm)" = healthy ] && break
+            sleep 2
+          done
+          [ "$(docker inspect --format '{{.State.Health.Status}}' crm)" = healthy ]
+          curl -fsS 'http://localhost:8081/healthz' | grep -q 'ok'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs crm || true
+
+  contact:
+    name: php-contact-form
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: php-contact-form
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_sqlite, mbstring
+          coverage: none
+
+      - name: Lint (php -l)
+        run: find . -type f \( -name '*.php' -o -path './bin/*' \) -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Tests
+        run: php tests/run.php
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: php-contact-form/Dockerfile
+
+      - name: Docker build and smoke test
+        run: |
+          set -eux
+          docker build -t php-contact-form:ci .
+          docker run -d --name contact -p 8082:8080 php-contact-form:ci
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' contact)" = healthy ] && break
+            sleep 2
+          done
+          [ "$(docker inspect --format '{{.State.Health.Status}}' contact)" = healthy ]
+          curl -fsS 'http://localhost:8082/' | grep -q 'Send message'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs contact || true
+
+  products-api:
+    name: php-products-api
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: php-products-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_sqlite, mbstring
+          coverage: none
+
+      - name: Lint (php -l)
+        run: find . -type f \( -name '*.php' -o -path './bin/*' \) -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Tests
+        run: php tests/run.php
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: php-products-api/Dockerfile
+
+      - name: Docker build and smoke test
+        run: |
+          set -eux
+          docker build -t php-products-api:ci .
+          docker run -d --name products-api -p 8083:8080 php-products-api:ci
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' products-api)" = healthy ] && break
+            sleep 2
+          done
+          [ "$(docker inspect --format '{{.State.Health.Status}}' products-api)" = healthy ]
+          curl -fsS 'http://localhost:8083/api/products?per_page=1' | grep -q '"meta"'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs products-api || true
+
+  legacy:
+    name: php-legacy-modernization
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: php-legacy-modernization
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_sqlite, mbstring
+          coverage: none
+
+      - name: Lint (php -l)
+        run: find . -type f \( -name '*.php' -o -path './bin/*' \) -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Tests
+        run: php tests/run.php
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: php-legacy-modernization/Dockerfile
+
+      - name: Docker build and smoke test
+        run: |
+          set -eux
+          docker build -t php-legacy-modernization:ci .
+          docker run -d --name legacy -p 8084:8080 php-legacy-modernization:ci
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' legacy)" = healthy ] && break
+            sleep 2
+          done
+          [ "$(docker inspect --format '{{.State.Health.Status}}' legacy)" = healthy ]
+          curl -fsS 'http://localhost:8084/healthz' | grep -q 'ok'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs legacy || true

@@ -1,0 +1,29 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/*
+ * Creates (or recreates with --fresh) the demo database used by both before/ and after/.
+ * Path: APP_DB or var/app.sqlite.
+ */
+
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+
+$path = getenv('APP_DB') ?: dirname(__DIR__) . '/var/app.sqlite';
+if (in_array('--fresh', $argv, true) && is_file($path)) {
+    unlink($path);
+}
+if (!is_dir(dirname($path))) {
+    mkdir(dirname($path), 0775, true);
+}
+
+$pdo = new PDO('sqlite:' . $path, options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$pdo->exec((string) file_get_contents(dirname(__DIR__) . '/database/schema.sql'));
+if ((int) $pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn() === 0) {
+    $pdo->exec((string) file_get_contents(dirname(__DIR__) . '/database/seed.sql'));
+}
+
+echo "Database ready: {$path}\n";

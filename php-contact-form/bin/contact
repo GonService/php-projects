@@ -1,0 +1,87 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use ContactForm\Config;
+use ContactForm\Domain\RateLimiter;
+use ContactForm\Domain\Settings;
+use ContactForm\Mail\Email;
+use ContactForm\Mail\MailerFactory;
+use ContactForm\Support\Database;
+use ContactForm\Support\DemoSeeder;
+
+require dirname(__DIR__) . '/src/autoload.php';
+
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+
+$usage = <<<'TXT'
+    Usage:
+      php bin/contact set-inbox-password      Set the password of the /inbox page
+      php bin/contact seed-demo               Insert fictional demo messages
+      php bin/contact prune                   Delete rate-limit entries older than one day
+      php bin/contact send-test-mail          Send a test e-mail with the SMTP_* settings
+
+    The password is read from INBOX_PASSWORD or asked interactively.
+    The database path comes from CONTACT_DB (default: var/contact.sqlite).
+
+    TXT;
+
+$dsn = Database::defaultDsn();
+if (!is_dir(dirname(substr($dsn, 7)))) {
+    mkdir(dirname(substr($dsn, 7)), 0775, true);
+}
+$pdo = Database::connect($dsn);
+Database::migrate($pdo);
+
+switch ($argv[1] ?? 'help') {
+    case 'set-inbox-password':
+        $password = getenv('INBOX_PASSWORD');
+        if ($password === false || $password === '') {
+            fwrite(STDOUT, 'Inbox password (min. 10 characters): ');
+            $tty = stream_isatty(STDIN);
+            if ($tty) {
+                shell_exec('stty -echo');
+            }
+            $password = rtrim((string) fgets(STDIN), "\r\n");
+            if ($tty) {
+                shell_exec('stty echo');
+                fwrite(STDOUT, PHP_EOL);
+            }
+        }
+        if (mb_strlen($password) < 10) {
+            fwrite(STDERR, "The password must have at least 10 characters.\n");
+            exit(1);
+        }
+        (new Settings($pdo))->setInboxPassword($password);
+        echo "Inbox password saved. Open /inbox to read messages.\n";
+        break;
+
+    case 'seed-demo':
+        $count = (new DemoSeeder($pdo))->run(new DateTimeImmutable('now', new DateTimeZone('America/Sao_Paulo')));
+        echo "Inserted {$count} demo messages.\n";
+        break;
+
+    case 'prune':
+        $deleted = (new RateLimiter($pdo, (new Settings($pdo))->secret()))->prune(86400, time());
+        echo "Deleted {$deleted} old rate-limit entries.\n";
+        break;
+
+    case 'send-test-mail':
+        $env = getenv();
+        $config = Config::fromEnv($env);
+        $mailer = MailerFactory::fromEnv($env);
+        if ($mailer->name() === 'disabled') {
+            fwrite(STDERR, "SMTP_HOST is not set: e-mail is disabled and messages are only stored.\n");
+            exit(1);
+        }
+        $mailer->send(new Email($config->mailFrom, $config->mailTo, 'Contact form: SMTP test', "SMTP settings work.\n"));
+        echo "Test e-mail sent to {$config->mailTo}.\n";
+        break;
+
+    default:
+        echo $usage;
+        exit(($argv[1] ?? 'help') === 'help' ? 0 : 1);
+}

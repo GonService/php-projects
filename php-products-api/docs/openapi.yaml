@@ -1,0 +1,568 @@
+openapi: 3.0.3
+info:
+  title: Products API
+  version: 1.0.0
+  description: |
+    REST JSON API for a product catalog. Reads are public; POST, PUT, PATCH and DELETE need an
+    API key (`X-API-Key` header or `Authorization: Bearer`). Every GET returns an `ETag`; send it
+    in `If-None-Match` to receive `304 Not Modified`. Product writes accept `If-Match` for
+    optimistic locking. Prices are integers in cents (BRL).
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:8000
+    description: Local (php -S)
+tags:
+  - name: Products
+  - name: Categories
+  - name: Health
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: The API is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /api/products:
+    get:
+      tags: [Products]
+      summary: List products
+      operationId: listProducts
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - name: q
+          in: query
+          description: Text search in name and SKU
+          schema: { type: string, maxLength: 100 }
+        - name: category_id
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: min_price
+          in: query
+          description: Minimum price in cents
+          schema: { type: integer, minimum: 0 }
+        - name: max_price
+          in: query
+          description: Maximum price in cents
+          schema: { type: integer, minimum: 0 }
+        - name: active
+          in: query
+          schema: { type: boolean }
+        - name: in_stock
+          in: query
+          schema: { type: boolean }
+        - name: sort
+          in: query
+          description: >-
+            Comma-separated columns (name, sku, price_cents, stock, created_at, updated_at, id);
+            prefix with "-" for descending. Default: name.
+          schema: { type: string, example: "-price_cents,name" }
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: A page of products
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta, links]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Product" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+                  links: { $ref: "#/components/schemas/PageLinks" }
+        "304": { $ref: "#/components/responses/NotModified" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    post:
+      tags: [Products]
+      summary: Create a product
+      operationId: createProduct
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductInput" }
+            example:
+              sku: FIT-ISO-19
+              name: Fita isolante 19 mm x 20 m
+              price_cents: 790
+              stock: 120
+              category_id: 2
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              description: URL of the new product
+              schema: { type: string, example: /api/products/11 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/products/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [Products]
+      summary: Get a product
+      operationId: getProduct
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The product
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductDocument" }
+        "304": { $ref: "#/components/responses/NotModified" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Products]
+      summary: Replace a product
+      description: Sends the whole product; optional fields that are left out get their defaults.
+      operationId: replaceProduct
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductInput" }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    patch:
+      tags: [Products]
+      summary: Update some fields of a product
+      operationId: updateProduct
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductPatch" }
+            example: { price_cents: 49900, active: false }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    delete:
+      tags: [Products]
+      summary: Delete a product
+      operationId: deleteProduct
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+
+  /api/categories:
+    get:
+      tags: [Categories]
+      summary: List categories
+      operationId: listCategories
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - name: q
+          in: query
+          description: Text search in the name
+          schema: { type: string, maxLength: 100 }
+        - name: sort
+          in: query
+          description: name, slug, created_at or id; prefix with "-" for descending. Default name.
+          schema: { type: string }
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: A page of categories
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta, links]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Category" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+                  links: { $ref: "#/components/schemas/PageLinks" }
+        "304": { $ref: "#/components/responses/NotModified" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    post:
+      tags: [Categories]
+      summary: Create a category
+      operationId: createCategory
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryInput" }
+            example: { name: Segurança e EPI }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location:
+              schema: { type: string, example: /api/categories/5 }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CategoryDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/categories/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [Categories]
+      summary: Get a category
+      operationId: getCategory
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The category
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CategoryDocument" }
+        "304": { $ref: "#/components/responses/NotModified" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Categories]
+      summary: Replace a category
+      operationId: replaceCategory
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CategoryDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    patch:
+      tags: [Categories]
+      summary: Update some fields of a category
+      operationId: updateCategory
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryPatch" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CategoryDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    delete:
+      tags: [Categories]
+      summary: Delete a category
+      description: Refused with 409 while products still belong to the category.
+      operationId: deleteCategory
+      security: [{ ApiKey: [] }, { Bearer: [] }]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The category still has products
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    Bearer:
+      type: http
+      scheme: bearer
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PerPage:
+      name: per_page
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      description: ETag from a previous response; returns 304 when unchanged
+      schema: { type: string }
+    IfMatch:
+      name: If-Match
+      in: header
+      description: ETag of the version being changed; returns 412 if it changed meanwhile
+      schema: { type: string }
+
+  headers:
+    ETag:
+      description: Strong validator of the response body
+      schema: { type: string, example: '"5d41402abc4b2a76b9719d911017c592..."' }
+
+  responses:
+    NotModified:
+      description: The client's cached copy is current (empty body)
+    BadRequest:
+      description: The body is not valid JSON or not a JSON object
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing, invalid or revoked API key
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, example: Bearer realm="products-api" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PreconditionFailed:
+      description: If-Match did not match the current version
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UnsupportedMediaType:
+      description: Content-Type is not application/json
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: Invalid body (validation_failed) or query string (invalid_query)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              status: 422
+              code: validation_failed
+              message: The given data was invalid.
+              details:
+                sku: [Another product already uses this SKU.]
+                price_cents: [Must be an integer.]
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [status, code, message]
+          properties:
+            status: { type: integer, example: 422 }
+            code:
+              type: string
+              enum:
+                - invalid_json
+                - unauthorized
+                - not_found
+                - method_not_allowed
+                - category_in_use
+                - precondition_failed
+                - unsupported_media_type
+                - validation_failed
+                - invalid_query
+                - server_error
+            message: { type: string }
+            details:
+              type: object
+              description: Field name to list of messages
+              additionalProperties:
+                type: array
+                items: { type: string }
+
+    PageMeta:
+      type: object
+      properties:
+        page: { type: integer, example: 1 }
+        per_page: { type: integer, example: 20 }
+        total: { type: integer, example: 10 }
+        total_pages: { type: integer, example: 1 }
+
+    PageLinks:
+      type: object
+      properties:
+        self: { type: string }
+        first: { type: string }
+        last: { type: string }
+        prev: { type: string, nullable: true }
+        next: { type: string, nullable: true }
+
+    Product:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        sku: { type: string, example: FUR-650W }
+        name: { type: string, example: Furadeira de impacto 650 W }
+        description: { type: string }
+        price_cents: { type: integer, example: 28990 }
+        currency: { type: string, example: BRL }
+        stock: { type: integer, example: 14 }
+        active: { type: boolean }
+        category:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            slug: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ProductDocument:
+      type: object
+      properties:
+        data: { $ref: "#/components/schemas/Product" }
+
+    ProductInput:
+      type: object
+      additionalProperties: false
+      required: [sku, name, price_cents]
+      properties:
+        sku:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{1,39}$"
+          description: Stored in upper case; unique
+        name: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, maxLength: 2000, default: "" }
+        price_cents: { type: integer, minimum: 0, maximum: 100000000 }
+        stock: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+        active: { type: boolean, default: true }
+        category_id: { type: integer, nullable: true, default: null }
+
+    ProductPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        sku: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{1,39}$" }
+        name: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        price_cents: { type: integer, minimum: 0, maximum: 100000000 }
+        stock: { type: integer, minimum: 0, maximum: 1000000 }
+        active: { type: boolean }
+        category_id: { type: integer, nullable: true }
+
+    Category:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        name: { type: string, example: Ferramentas elétricas }
+        slug: { type: string, example: ferramentas-eletricas }
+        description: { type: string }
+        product_count: { type: integer, example: 3 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CategoryDocument:
+      type: object
+      properties:
+        data: { $ref: "#/components/schemas/Category" }
+
+    CategoryInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 80 }
+        slug:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 80
+          description: Generated from the name when omitted
+        description: { type: string, maxLength: 500, default: "" }
+
+    CategoryPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 2, maxLength: 80 }
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 80 }
+        description: { type: string, maxLength: 500 }

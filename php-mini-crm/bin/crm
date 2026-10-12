@@ -1,0 +1,90 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use MiniCrm\Domain\Document;
+use MiniCrm\Domain\UserRepository;
+use MiniCrm\Support\Database;
+use MiniCrm\Support\DemoSeeder;
+
+require dirname(__DIR__) . '/src/autoload.php';
+
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+
+$usage = <<<'TXT'
+    Usage:
+      php bin/crm migrate                          Create the SQLite tables
+      php bin/crm create-admin <email> <name>      Create the admin user (or reset its password)
+      php bin/crm seed-demo                        Insert demo customers, notes and follow-ups
+      php bin/crm check-document <cpf-or-cnpj>     Validate a CPF/CNPJ from the command line
+
+    The password is read from CRM_ADMIN_PASSWORD or asked interactively.
+    The database path comes from CRM_DB (default: var/crm.sqlite).
+
+    TXT;
+
+$command = $argv[1] ?? 'help';
+
+/** Reads a line without echoing it when running in a terminal. */
+$askSecret = static function (string $prompt): string {
+    fwrite(STDOUT, $prompt);
+    $tty = stream_isatty(STDIN);
+    if ($tty) {
+        shell_exec('stty -echo');
+    }
+    $line = (string) fgets(STDIN);
+    if ($tty) {
+        shell_exec('stty echo');
+        fwrite(STDOUT, PHP_EOL);
+    }
+
+    return rtrim($line, "\r\n");
+};
+
+$dsn = Database::defaultDsn();
+if (str_starts_with($dsn, 'sqlite:') && !is_dir(dirname(substr($dsn, 7)))) {
+    mkdir(dirname(substr($dsn, 7)), 0775, true);
+}
+
+switch ($command) {
+    case 'migrate':
+        Database::migrate(Database::connect($dsn));
+        echo "Database ready: {$dsn}\n";
+        break;
+
+    case 'create-admin':
+        [$email, $name] = [$argv[2] ?? '', $argv[3] ?? ''];
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false || trim($name) === '') {
+            fwrite(STDERR, "Give a valid e-mail and a name.\n\n" . $usage);
+            exit(1);
+        }
+        $password = getenv('CRM_ADMIN_PASSWORD') ?: $askSecret('Password (min. 10 characters): ');
+        if (mb_strlen($password) < 10) {
+            fwrite(STDERR, "The password must have at least 10 characters.\n");
+            exit(1);
+        }
+        $pdo = Database::connect($dsn);
+        Database::migrate($pdo);
+        (new UserRepository($pdo))->upsert($email, trim($name), $password);
+        echo "Admin user {$email} is ready. Sign in at /login.\n";
+        break;
+
+    case 'seed-demo':
+        $pdo = Database::connect($dsn);
+        Database::migrate($pdo);
+        $count = (new DemoSeeder($pdo))->run(new DateTimeImmutable('today', new DateTimeZone('America/Sao_Paulo')));
+        echo "Inserted {$count} demo customers.\n";
+        break;
+
+    case 'check-document':
+        $doc = Document::tryParse($argv[2] ?? '');
+        echo $doc === null ? "invalid\n" : "valid {$doc->type->label()} {$doc->formatted()}\n";
+        exit($doc === null ? 1 : 0);
+
+    default:
+        echo $usage;
+        exit($command === 'help' ? 0 : 1);
+}

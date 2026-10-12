@@ -1,0 +1,6 @@
+.git
+docs/*.png
+tests
+var/*.sqlite*
+Dockerfile
+.dockerignore
